@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+
+# Ruff stuff:
+.ruff_cache/
+
+# LoRA Adapters
+lora_adapters/*
+!lora_adapters/.gitignore
+
+# Models
+models/*
+!models/.gitignore
+
+# Generated images
+images/*
+!images/.gitignore

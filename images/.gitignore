@@ -1,0 +1,3 @@
+# In images/.gitignore
+   *
+   !.gitignore

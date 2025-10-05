@@ -1,0 +1,3 @@
+# In models/.gitignore
+   *
+   !.gitignore
