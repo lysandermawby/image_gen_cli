@@ -25,3 +25,6 @@ models/*
 # Generated images
 images/*
 !images/.gitignore
+
+# Darwin files
+.DS_Store
