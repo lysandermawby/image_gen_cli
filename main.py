@@ -3,16 +3,14 @@
 
 # package imports
 import torch
-from diffusers import StableDiffusionXLPipeline
 import click
 import os
 from pathlib import Path
-from huggingface_hub import hf_hub_download
 import subprocess
-# import re
 
 # local imports
 import callback_utils
+import model_loader
 from print_utils import print_error
 
 # script variables
@@ -121,96 +119,26 @@ def save_image(image, image_name):
 
 
 def generate_diffusion_pipe(device, dtype, model_path=None, model_name=None, lora=None):
-    """generate the diffusion pipeline"""
+    """Generate the diffusion pipeline"""
 
-    # will download the model if it isn't found in the .cache/huggingface/hub folder directory.
+    # Load model using model_loader
+    pipe = model_loader.load_model(device, dtype, model_path, model_name)
 
-    MODELS = {
-        "illustrious": {
-            "repo_id": "OnomaAIResearch/Illustrious-XL-v1.1",
-            "filename": "Illustrious-XL-v1.1.safetensors"
-        },
-        "animagine-4": {
-            "repo_id": "cagliostrolab/animagine-xl-4.0",
-            "filename": None  # uses from_pretrained directly
-        },
-        "animagine-3": {
-            "repo_id": "Linaqruf/animagine-xl",
-            "filename": None
-        }
-    }
+    if pipe is None:
+        return None
 
-    if model_name is None:
-        model_name = "illustrious"
-        print(f"No model name provided. Using {model_name} by default")
-    elif model_name not in MODELS.keys():
-        print(f"Model provided is not available. Please choose one of the following available models: {', '.join(MODELS.keys())}")
-    else:
-        print(f"Model {model_name} successfully located and deployed")
-
-    repo_id = MODELS[model_name]["repo_id"]
-    filename = MODELS[model_name]["filename"]
-
-    # repo_id = "OnomaAIResearch/Illustrious-XL-v1.1"
-    # filename = "Illustrious-XL-v1.1.safetensors"
-
-    if model_path:
-        # Custom local model
-        model_path = Path(f"models/{model_path}")
-        pipe = StableDiffusionXLPipeline.from_single_file(
-            model_path,
-            torch_dtype=dtype,
-            use_safetensors=True,
-            add_watermarker=False,
-        )
-    elif filename:
-        # Single-file model (like illustrious)
-        try:
-            print("Checking cache for model")
-            model_path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                repo_type="model",
-                local_files_only=True,
-            )
-            print(f"Successfully found model: {repo_id}/{filename}")
-        except Exception:
-            print("Model not found in cache. Downloading (~7GB for first download)")
-            model_path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                repo_type="model"
-            )
-            print(f"Successfully downloaded model: {repo_id}/{filename}")
-
-        pipe = StableDiffusionXLPipeline.from_single_file(
-            model_path,
-            torch_dtype=dtype,
-            use_safetensors=True,
-            add_watermarker=False,
-        )
-    else:
-        # Repository model (like animagine)
-        print(f"Loading model from repository: {repo_id}")
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            repo_id,
-            torch_dtype=dtype,
-            add_watermarker=False,
-            use_safetensors=True,
-        )
-
-    # move to device and ensure consistent dtype
+    # Move to device and ensure consistent dtype
     pipe = pipe.to(device)
 
-    # force all model components to have a consistent data type. Required for CPU processing
+    # Force all model components to have a consistent data type. Required for CPU processing
     if device == "cpu":
         pipe = pipe.to(torch.float32)
 
-    # optional memory optimisations
+    # Optional memory optimisations
     pipe.enable_vae_slicing()
     pipe.enable_vae_tiling()
 
-    # optional if a LoRA adapter is specified
+    # Optional if a LoRA adapter is specified
     if lora:
         path_to_lora = Path("lora_adapters/" + lora)
         print(f"Adding LoRA weights: {path_to_lora}")
@@ -251,10 +179,11 @@ def show_all_adapters():
 @click.option("--gif-name", type=str, default=None, help="saved gif name")
 @click.option("--no-display", is_flag=True, help="suppress image display")
 @click.option("--list", "show_list", is_flag=True, help="list available LoRA adapters")
+@click.option("--model-list", "show_model_list", is_flag=True, help="show list of available models")
 @click.option("-v", "--version", "show_version", is_flag=True, help="show script version")
 def main(prompt, negative_prompt, lora, model_path, model_name, num_inference_steps,
          guidance_scale, width, height, seed, image_name, save_gif, gif_name,
-         no_display, show_list, show_version):
+         no_display, show_list, show_model_list, show_version):
     """Generate images using a locally hosted diffusion model"""
 
     if show_version:
@@ -268,6 +197,10 @@ def main(prompt, negative_prompt, lora, model_path, model_name, num_inference_st
         else:
             print("No directory 'lora_adapters' found")
         return
+    
+    if show_model_list:
+        model_loader.print_available_models()
+        return
 
     if not prompt:
         print_error("Error: Prompt is required for image generation")
@@ -280,6 +213,10 @@ def main(prompt, negative_prompt, lora, model_path, model_name, num_inference_st
     dtype = torch.float16 if device == "cuda" else torch.float32
 
     pipe = generate_diffusion_pipe(device, dtype, model_path, model_name, lora)
+
+    if pipe is None:
+        print_error("Failed to load model. Exiting.")
+        return 1
 
     image, intermediate_images = generate_image(
         pipe,
